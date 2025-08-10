@@ -15,6 +15,16 @@ pub fn printMoves(allocator: std.mem.Allocator, moves: []ZChess.Move) !void {
     }
 }
 
+pub fn stripWindowsNewline(s: []const u8) []const u8 {
+    if (s.len >= 2 and s[s.len - 2] == '\r' and s[s.len - 1] == '\n') {
+        return s[0 .. s.len - 2];
+    } else if (s.len >= 1 and s[s.len - 1] == '\n') {
+        return s[0 .. s.len - 1];
+    } else {
+        return s;
+    }
+}
+
 pub fn runUCI(allocator: std.mem.Allocator) !void {
     var moveGen = ZChess.MoveGen.initMoveGeneration();
 
@@ -70,9 +80,9 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         }
 
         std.debug.print("{s}'s move: ", .{@tagName(board.turn)});
-        const moveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 16);
-        defer allocator.free(moveStr);
-
+        const rawMoveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 16);
+        defer allocator.free(rawMoveStr);
+        const moveStr = stripWindowsNewline(rawMoveStr);
         const move = try ZChess.Move.fromUCIStr(moveStr);
         while (!moveIsLegal(board.possibleMoves, move)) {
             std.debug.print("Illegal move: {s}\n", .{moveStr});
