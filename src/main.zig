@@ -37,31 +37,54 @@ pub fn runUCI(allocator: std.mem.Allocator) !void {
     //};
 }
 
-pub fn runStandalone(allocator: std.mem.Allocator, fenStr: []const u8) !void {
+fn eqlMove(a: ZChess.Move, b: ZChess.Move) bool {
+    return a.from_square.toFlat() == b.from_square.toFlat() and a.to_square.toFlat() == b.to_square.toFlat() and a.promotion_piecetype == b.promotion_piecetype;
+}
+
+pub fn moveIsLegal(possibles: []const ZChess.Move, needle: ZChess.Move) bool {
+    for (possibles) |thing| {
+        if (eqlMove(thing, needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
     var moveGen = ZChess.MoveGen.initMoveGeneration();
 
     var board = try ZChess.Board.emptyBoard(allocator, &moveGen);
     defer board.deinit();
 
+    var stdin = std.io.getStdIn().reader();
+
     try board.loadFEN(fenStr);
-    const boardStr = try board.toString(allocator);
-    defer allocator.free(boardStr);
-    std.debug.print("Starting position: {s}\n", .{boardStr});
+    while (true) {
+        const boardStr = try board.toString(allocator);
+        defer allocator.free(boardStr);
+        std.debug.print("{s}\n", .{boardStr});
 
-    const moves = try moveGen.generateMoves(allocator, &board, Color.White, .{});
-    defer allocator.free(moves);
+        if (board.possibleMoves.len == 0) {
+            std.debug.print("No legal moves available. Game over.\n", .{});
+            break;
+        }
 
-    try printMoves(allocator, moves);
-    const pins = try moveGen.getPins(&board, Color.White, allocator);
-    defer allocator.free(pins);
+        std.debug.print("{s}'s move: ", .{@tagName(board.turn)});
+        const moveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 16);
+        defer allocator.free(moveStr);
 
-    for (pins) |pin| {
-        std.debug.print("Pin: {d},{d},({d},{d})\n", .{ pin.pinned_square, pin.attacker_square, pin.pin_dirx, pin.pin_diry });
+        const move = try ZChess.Move.fromUCIStr(moveStr);
+        while (!moveIsLegal(board.possibleMoves, move)) {
+            std.debug.print("Illegal move: {s}\n", .{moveStr});
+            continue;
+        }
+
+        try board.makeMove(move);
     }
 }
 
 pub fn printHelp() void {
-    std.debug.print("Usage: chess [run-uci|standalone <FEN>]\n", .{});
+    std.debug.print("Usage: chess [run-uci|game]\n", .{});
 }
 
 pub fn main() !void {
@@ -79,8 +102,8 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "run-uci")) {
         try runUCI(allocator);
-    } else if (std.mem.eql(u8, args[1], "standalone")) {
-        try runStandalone(allocator, args[2]);
+    } else if (std.mem.eql(u8, args[1], "game")) {
+        try runCliGame(allocator, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     } else {
         printHelp();
     }
