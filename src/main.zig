@@ -15,13 +15,45 @@ pub fn printMoves(allocator: std.mem.Allocator, moves: []ZChess.Move) !void {
     }
 }
 
-pub fn stripWindowsNewline(s: []const u8) []const u8 {
-    if (s.len >= 2 and s[s.len - 2] == '\r' and s[s.len - 1] == '\n') {
-        return s[0 .. s.len - 2];
-    } else if (s.len >= 1 and s[s.len - 1] == '\n') {
-        return s[0 .. s.len - 1];
-    } else {
-        return s;
+pub fn stripWhitespace(s: []const u8) []const u8 {
+    var start: usize = 0;
+    var end: usize = s.len;
+
+    // Find the first non-whitespace character
+    while (start < end and std.ascii.isWhitespace(s[start])) {
+        start += 1;
+    }
+
+    // Find the last non-whitespace character
+    while (end > start and std.ascii.isWhitespace(s[end - 1])) {
+        end -= 1;
+    }
+
+    return s[start..end];
+}
+
+test "stripping" {
+    const testCases = [_][]const u8{
+        "hello\n",
+        "hello\r\n",
+        "hello",
+        "hello\r",
+    };
+
+    const expectedResults = [_][]const u8{
+        "hello",
+        "hello",
+        "hello",
+        "hello",
+    };
+
+    for (testCases, expectedResults) |testCase, ex| {
+        const result = stripWhitespace(testCase);
+        try std.testing.expectEqualStrings(ex, result);
+        if (result.len == 0) {
+            std.debug.print("Expected non-empty output, got empty string.\n", .{});
+            return error.InvalidInput;
+        }
     }
 }
 
@@ -82,14 +114,21 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         std.debug.print("{s}'s move: ", .{@tagName(board.turn)});
         const rawMoveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 16);
         defer allocator.free(rawMoveStr);
-        const moveStr = stripWindowsNewline(rawMoveStr);
+        const moveStr = stripWhitespace(rawMoveStr);
         const move = try ZChess.Move.fromUCIStr(moveStr);
         while (!moveIsLegal(board.possibleMoves, move)) {
             std.debug.print("Illegal move: {s}\n", .{moveStr});
             continue;
         }
 
-        try board.makeMove(move);
+        board.makeMove(move) catch |err| {
+            switch (err) {
+                error.InvalidMove => std.debug.print("Invalid move: {s}\n", .{moveStr}),
+                error.NotReady => std.debug.print("Board not ready for move: {s}\n", .{moveStr}),
+                else => std.debug.print("Error making move: {!}\n", .{err}),
+            }
+            continue;
+        };
     }
 }
 
