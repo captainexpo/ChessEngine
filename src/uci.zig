@@ -79,16 +79,11 @@ pub const UCI = struct {
             return;
         }
         if (std.mem.eql(u8, cmd_str, "legalmoves")) {
-            const _starttime = std.time.nanoTimestamp();
-            const legalMoves = try self.moveGen.generateMoves(self.allocator, &self.board, self.board.turn, .{});
-            const _endtime = std.time.nanoTimestamp();
+            const legalMoves = self.board.possibleMoves;
             for (legalMoves) |move| {
-                const moveStr = try move.toString(self.allocator);
-                defer self.allocator.free(moveStr);
-                _ = try self.stdout.print("{s} ", .{moveStr});
+                const moveStr = try move.toString();
+                std.debug.print("{s}\n", .{moveStr});
             }
-            std.debug.print("Generated {} legal moves in {} ns\n", .{ legalMoves.len, _endtime - _starttime });
-            _ = try self.stdout.print("\n", .{});
             return;
         }
         var tokenized = std.mem.tokenizeAny(u8, cmd_str, " ");
@@ -111,7 +106,7 @@ pub const UCI = struct {
             while (tokenized.next()) |next| {
                 lastMove = next;
             }
-            try self.board.makeMove(try ZChess.Move.fromUCIStr(lastMove));
+            _ = try self.board.makeMove(try ZChess.Move.fromUCIStr(lastMove));
         }
         if (std.mem.eql(u8, first, "go")) {
             // Ignore time control, just get the best move
@@ -121,11 +116,10 @@ pub const UCI = struct {
 
             const move = try self.bot.getMove(newBoard);
 
-            try self.board.makeMove(move);
+            _ = try self.board.makeMove(move);
             self.allocator.destroy(newBoard);
 
-            const moveStr = try move.toString(self.allocator);
-            defer self.allocator.free(moveStr);
+            const moveStr = try move.toString();
             _ = try self.stdout.print("bestmove {s}\n", .{moveStr});
 
             afterGoCommand(self) catch |err| {

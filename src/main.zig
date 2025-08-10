@@ -6,10 +6,9 @@ const UCI = @import("uci.zig").UCI;
 
 pub const log_level: std.log.Level = .debug;
 
-pub fn printMoves(allocator: std.mem.Allocator, moves: []ZChess.Move) !void {
+pub fn printMoves(moves: []ZChess.Move) !void {
     for (moves) |move| {
-        const movestr = try move.toString(allocator);
-        defer allocator.free(movestr);
+        const movestr = try move.toString();
 
         std.debug.print("{s}\n", .{movestr});
     }
@@ -19,12 +18,10 @@ pub fn stripWhitespace(s: []const u8) []const u8 {
     var start: usize = 0;
     var end: usize = s.len;
 
-    // Find the first non-whitespace character
     while (start < end and std.ascii.isWhitespace(s[start])) {
         start += 1;
     }
 
-    // Find the last non-whitespace character
     while (end > start and std.ascii.isWhitespace(s[end - 1])) {
         end -= 1;
     }
@@ -80,7 +77,8 @@ pub fn runUCI(allocator: std.mem.Allocator) !void {
 }
 
 fn eqlMove(a: ZChess.Move, b: ZChess.Move) bool {
-    return a.from_square.toFlat() == b.from_square.toFlat() and a.to_square.toFlat() == b.to_square.toFlat() and a.promotion_piecetype == b.promotion_piecetype;
+    const areEqual = a.from_square.toFlat() == b.from_square.toFlat() and a.to_square.toFlat() == b.to_square.toFlat() and a.promotion_piecetype == b.promotion_piecetype;
+    return areEqual;
 }
 
 pub fn moveIsLegal(possibles: []const ZChess.Move, needle: ZChess.Move) bool {
@@ -101,6 +99,7 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
     var stdin = std.io.getStdIn().reader();
 
     try board.loadFEN(fenStr);
+    var undo: ?ZChess.Board.MoveUndo = null;
     while (true) {
         const boardStr = try board.toString(allocator);
         defer allocator.free(boardStr);
@@ -112,16 +111,38 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         }
 
         std.debug.print("{s}'s move: ", .{@tagName(board.turn)});
-        const rawMoveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 16);
+        const rawMoveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 2048);
         defer allocator.free(rawMoveStr);
+
         const moveStr = stripWhitespace(rawMoveStr);
+        if (std.mem.eql(u8, rawMoveStr, "legalmoves")) {
+            std.debug.print("Legal moves:\n", .{});
+            try printMoves(board.possibleMoves);
+            continue;
+        } else if (std.mem.eql(u8, rawMoveStr, "exit")) {
+            std.debug.print("Exiting game.\n", .{});
+            break;
+        } else if (std.mem.eql(u8, rawMoveStr, "boardinfo")) {
+            board.printDebugInfo();
+            continue;
+        } else if (std.mem.eql(u8, rawMoveStr, "undo")) {
+            if (undo) |u| {
+                try board.undoMove(u);
+                std.debug.print("Move undone.\n", .{});
+            } else {
+                std.debug.print("No move to undo.\n", .{});
+            }
+            continue;
+        }
+
         const move = try ZChess.Move.fromUCIStr(moveStr);
-        while (!moveIsLegal(board.possibleMoves, move)) {
+        if (!moveIsLegal(board.possibleMoves, move)) {
             std.debug.print("Illegal move: {s}\n", .{moveStr});
             continue;
         }
 
-        board.makeMove(move) catch |err| {
+        const classified = try board.classifyMove(move);
+        undo = board.makeMove(classified) catch |err| {
             switch (err) {
                 error.InvalidMove => std.debug.print("Invalid move: {s}\n", .{moveStr}),
                 error.NotReady => std.debug.print("Board not ready for move: {s}\n", .{moveStr}),
