@@ -42,10 +42,7 @@ pub const UCI = struct {
     }
 
     pub fn afterGoCommand(self: *UCI) !void {
-        const boardStr = try self.board.toString(self.allocator);
-        defer self.allocator.free(boardStr);
-
-        try self.stdout.print("{s}\n", .{boardStr});
+        _ = self;
     }
 
     pub fn recieveFENLoadCommand(self: *UCI, cmd_str: []const u8, iterator: *std.mem.TokenIterator(u8, .any)) !void {
@@ -81,8 +78,9 @@ pub const UCI = struct {
         if (std.mem.eql(u8, cmd_str, "legalmoves")) {
             const legalMoves = self.board.possibleMoves;
             for (legalMoves) |move| {
-                const moveStr = try move.toString();
-                std.debug.print("{s}\n", .{moveStr});
+                const moveStr = try move.toString(self.allocator);
+                defer self.allocator.free(moveStr);
+                _ = try self.stdout.print("{s}\n", .{moveStr});
             }
             return;
         }
@@ -102,24 +100,24 @@ pub const UCI = struct {
             _ = tokenized.next() orelse {
                 return;
             }; // Skip "moves"
-            var lastMove: []const u8 = "";
             while (tokenized.next()) |next| {
-                lastMove = next;
+                const classified = try self.board.classifyMove(try ZChess.Move.fromUCIStr(next));
+                _ = try self.board.makeMove(classified);
             }
-            _ = try self.board.makeMove(try ZChess.Move.fromUCIStr(lastMove));
         }
         if (std.mem.eql(u8, first, "go")) {
-            // Ignore time control, just get the best move
-            const newBoard = try self.allocator.create(ZChess.Board);
+            //const newBoard = try self.allocator.create(ZChess.Board);
+            //defer self.allocator.destroy(newBoard);
 
-            newBoard.* = self.board;
+            //newBoard.* = self.board;
 
-            const move = try self.bot.getMove(newBoard);
+            const move = try self.bot.getMove(&self.board);
 
-            _ = try self.board.makeMove(move);
-            self.allocator.destroy(newBoard);
+            const classified = try self.board.classifyMove(move);
+            _ = try self.board.makeMove(classified);
 
-            const moveStr = try move.toString();
+            const moveStr = try move.toString(self.allocator);
+            defer self.allocator.free(moveStr);
             _ = try self.stdout.print("bestmove {s}\n", .{moveStr});
 
             afterGoCommand(self) catch |err| {

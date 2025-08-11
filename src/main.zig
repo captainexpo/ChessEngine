@@ -6,10 +6,10 @@ const UCI = @import("uci.zig").UCI;
 
 pub const log_level: std.log.Level = .debug;
 
-pub fn printMoves(moves: []ZChess.Move) !void {
+pub fn printMoves(allocator: std.mem.Allocator, moves: []ZChess.Move) !void {
     for (moves) |move| {
-        const movestr = try move.toString();
-
+        const movestr = try move.toString(allocator);
+        defer allocator.free(movestr);
         std.debug.print("{s}\n", .{movestr});
     }
 }
@@ -117,7 +117,7 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         const moveStr = stripWhitespace(rawMoveStr);
         if (std.mem.eql(u8, rawMoveStr, "legalmoves")) {
             std.debug.print("Legal moves:\n", .{});
-            try printMoves(board.possibleMoves);
+            try printMoves(allocator, board.possibleMoves);
             continue;
         } else if (std.mem.eql(u8, rawMoveStr, "exit")) {
             std.debug.print("Exiting game.\n", .{});

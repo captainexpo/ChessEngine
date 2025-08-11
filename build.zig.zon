@@ -37,8 +37,8 @@
     // internet connectivity.
     .dependencies = .{
         .zig_chess = .{
-            .url = "git+https://github.com/captainexpo/ZigChess#6c6f1afdd8f3c6ee427255069ab41e91f651928e",
-            .hash = "zig_chess-0.1.0-1eTzGKATAQBrgJdkcofnx41kDJXMrx5RHLITCqvEVofR",
+            .url = "git+https://github.com/captainexpo/ZigChess#8777aa56907532b2f72619ec157d47f524d7463b",
+            .hash = "zig_chess-0.1.0-1eTzGJckAQBEvHUnXR8bYsOfpWMbo3kyZ3kSOthBU90x",
         },
     },
     .paths = .{
