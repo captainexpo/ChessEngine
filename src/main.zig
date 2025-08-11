@@ -166,13 +166,10 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        printHelp();
+        try runUCI(allocator);
         return;
     }
-
-    if (std.mem.eql(u8, args[1], "run-uci")) {
-        try runUCI(allocator);
-    } else if (std.mem.eql(u8, args[1], "game")) {
+    if (std.mem.eql(u8, args[1], "game")) {
         try runCliGame(allocator, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     } else {
         printHelp();

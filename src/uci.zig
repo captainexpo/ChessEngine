@@ -113,12 +113,12 @@ pub const UCI = struct {
 
             const move = try self.bot.getMove(&self.board);
 
-            const classified = try self.board.classifyMove(move);
-            _ = try self.board.makeMove(classified);
-
             const moveStr = try move.toString(self.allocator);
             defer self.allocator.free(moveStr);
             _ = try self.stdout.print("bestmove {s}\n", .{moveStr});
+
+            const classified = try self.board.classifyMove(move);
+            _ = try self.board.makeMove(classified);
 
             afterGoCommand(self) catch |err| {
                 std.debug.print("Error after go command: {!}\n", .{err});
