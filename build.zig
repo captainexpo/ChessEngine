@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const use_local_zchess = false; // toggle to switch between local and fetched package
+    const use_local_zchess = true; // toggle to switch between local and fetched package
 
     var zchess_mod: *std.Build.Module = undefined;
 
