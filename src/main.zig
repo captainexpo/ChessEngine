@@ -61,6 +61,7 @@ pub fn runUCI(allocator: std.mem.Allocator) !void {
     defer uci.deinit();
     uci.setBot(Bot.ChessBot{
         .allocator = allocator,
+        .uci_interface = &uci,
     });
     try uci.run(); // catch |err| {
     //switch (err) {
@@ -105,7 +106,9 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         defer allocator.free(boardStr);
         std.debug.print("{s}\n", .{boardStr});
 
-        if (board.possibleMoves.len == 0) {
+        const possibleMoves = try board.getPossibleMoves(allocator);
+        defer allocator.free(possibleMoves);
+        if (possibleMoves.len == 0) {
             std.debug.print("No legal moves available. Game over.\n", .{});
             break;
         }
@@ -117,7 +120,7 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         const moveStr = stripWhitespace(rawMoveStr);
         if (std.mem.eql(u8, rawMoveStr, "legalmoves")) {
             std.debug.print("Legal moves:\n", .{});
-            try printMoves(allocator, board.possibleMoves);
+            try printMoves(allocator, possibleMoves);
             continue;
         } else if (std.mem.eql(u8, rawMoveStr, "exit")) {
             std.debug.print("Exiting game.\n", .{});
@@ -136,18 +139,14 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         }
 
         const move = try ZChess.Move.fromUCIStr(moveStr);
-        if (!moveIsLegal(board.possibleMoves, move)) {
+        if (!moveIsLegal(possibleMoves, move)) {
             std.debug.print("Illegal move: {s}\n", .{moveStr});
             continue;
         }
 
         const classified = try board.classifyMove(move);
         undo = board.makeMove(classified) catch |err| {
-            switch (err) {
-                error.InvalidMove => std.debug.print("Invalid move: {s}\n", .{moveStr}),
-                error.NotReady => std.debug.print("Board not ready for move: {s}\n", .{moveStr}),
-                else => std.debug.print("Error making move: {!}\n", .{err}),
-            }
+            std.debug.print("Failed to make move: {!}\n", .{err});
             continue;
         };
     }
@@ -158,9 +157,9 @@ pub fn printHelp() void {
 }
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);

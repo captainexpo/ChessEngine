@@ -1,6 +1,6 @@
 const std = @import("std");
 const ZChess = @import("zchess");
-
+const PST = @import("squaretables.zig");
 const pieceValues = [_]i32{
     100, // Pawn
     320, // Knight
@@ -22,10 +22,41 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
     var score: i32 = 0;
 
     inline for (ptypes) |ptype| {
-        score += @as(i32, @popCount(board.getPieceBitboard(ptype, .White))) * pieceValues[@intFromEnum(ptype)];
-        score -= @as(i32, @popCount(board.getPieceBitboard(ptype, .Black))) * pieceValues[@intFromEnum(ptype)];
+        var bb = board.getPieceBitboard(ptype, .White);
+        while (bb != 0) {
+            const sq = @ctz(bb);
+            bb &= bb - 1;
+            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, sq);
+        }
+
+        bb = board.getPieceBitboard(ptype, .Black);
+        while (bb != 0) {
+            const sq = @ctz(bb);
+            bb &= bb - 1;
+            const mirroredSq = (7 - (sq / 8)) * 8 + (sq % 8);
+            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, mirroredSq);
+        }
     }
     return score;
+}
+
+fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
+    // Select PST for piece type and return value for square.
+    // Example:
+    return switch (ptype) {
+        .Pawn => PST.pawnTable[sq],
+        .Knight => PST.knightTable[sq],
+        .Bishop => PST.bishopTable[sq],
+        .Rook => PST.rookTable[sq],
+        .Queen => PST.queenTable[sq],
+        .King => PST.kingTable[sq],
+    };
+}
+
+pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
+    var score = evaluatePieceScore(board);
+    score += evaluateCheckmateScore(board);
+    return score * if (color == .White) @as(i32, 1) else @as(i32, -1);
 }
 
 fn evaluateCheckmateScore(board: *ZChess.Board) i32 {
@@ -37,13 +68,4 @@ fn evaluateCheckmateScore(board: *ZChess.Board) i32 {
         }
     }
     return 0;
-}
-
-pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
-    var score: i32 = 0;
-
-    score += evaluatePieceScore(board);
-    score += evaluateCheckmateScore(board);
-
-    return score * if (color == .White) @as(i32, 1) else @as(i32, -1);
 }

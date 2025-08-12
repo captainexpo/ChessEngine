@@ -27,6 +27,16 @@ pub const UCI = struct {
 
     running: bool = false,
 
+    pub const InfoKind = enum {
+        Depth,
+        Score_cp,
+        Score_mate,
+        Nodes,
+        Nps,
+        String,
+        Pv,
+    };
+
     pub fn new(allocator: std.mem.Allocator, stdout: std.fs.File.Writer, stdin: std.fs.File.Reader, moveGen: *ZChess.MoveGen) !UCI {
         return UCI{
             .allocator = allocator,
@@ -58,6 +68,28 @@ pub const UCI = struct {
         try self.board.loadFEN(fen);
     }
 
+    pub fn startInfo(self: *UCI) void {
+        _ = self.stdout.write("info ") catch {};
+    }
+    pub fn writeInfo(self: *UCI, kind: ?InfoKind, comptime fmt: []const u8, args: anytype) void {
+        if (kind) |k| {
+            _ = self.stdout.write(switch (k) {
+                .Depth => "depth ",
+                .Score_cp => "score cp ",
+                .Score_mate => "score mate ",
+                .Nodes => "nodes ",
+                .Nps => "nps ",
+                .Pv => "pv ",
+                .String => "string ",
+            }) catch return;
+        }
+        _ = self.stdout.print(fmt, args) catch {};
+        _ = self.stdout.write(" ") catch {};
+    }
+    pub fn endInfo(self: *UCI) void {
+        _ = self.stdout.write("\n") catch {};
+    }
+
     pub fn recieveCommand(self: *UCI, cmd_str: []const u8) !void {
         if (std.mem.eql(u8, cmd_str, "uci")) {
             _ = try self.stdout.write("uciok\n");
@@ -76,7 +108,8 @@ pub const UCI = struct {
             return;
         }
         if (std.mem.eql(u8, cmd_str, "legalmoves")) {
-            const legalMoves = self.board.possibleMoves;
+            const legalMoves = try self.board.getPossibleMoves(self.allocator);
+            defer self.allocator.free(legalMoves);
             for (legalMoves) |move| {
                 const moveStr = try move.toString(self.allocator);
                 defer self.allocator.free(moveStr);
@@ -106,11 +139,6 @@ pub const UCI = struct {
             }
         }
         if (std.mem.eql(u8, first, "go")) {
-            //const newBoard = try self.allocator.create(ZChess.Board);
-            //defer self.allocator.destroy(newBoard);
-
-            //newBoard.* = self.board;
-
             const move = try self.bot.getMove(&self.board);
 
             const moveStr = try move.toString(self.allocator);
