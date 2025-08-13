@@ -40,6 +40,11 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
     return score;
 }
 
+fn movementScore(board: *ZChess.Board) i32 {
+    const moves = board.moveGen.generateMoves(std.heap.page_allocator, board, board.turn, .{ .get_pseudo_legal = true }) catch return 0;
+    defer std.heap.page_allocator.free(moves.moves);
+    return @as(i32, @intCast(moves.moves.len)) * @as(i32, if (board.turn == .White) 10 else -10);
+}
 fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
     // Select PST for piece type and return value for square.
     // Example:
@@ -56,6 +61,7 @@ fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
 pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
     var score = evaluatePieceScore(board);
     score += evaluateCheckmateScore(board);
+    score += movementScore(board);
     return score * if (color == .White) @as(i32, 1) else @as(i32, -1);
 }
 

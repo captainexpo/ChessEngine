@@ -13,6 +13,8 @@ pub const ChessBot = struct {
     allocator: std.mem.Allocator,
     uci_interface: *UCI,
 
+    nodes: u64 = 0,
+
     pub fn init(self: *ChessBot, allocator: std.mem.Allocator, interface: *UCI) void {
         self.allocator = allocator;
         self.uci_interface = interface;
@@ -25,6 +27,7 @@ pub const ChessBot = struct {
     }
 
     pub fn getMove(self: *ChessBot, board: *ZChess.Board) !ZChess.Move {
+        self.nodes = 0;
         const moves = try board.getPossibleMoves(self.allocator);
         defer self.allocator.free(moves);
 
@@ -47,6 +50,7 @@ pub const ChessBot = struct {
             self.uci_interface.writeInfo(.Depth, "{d}", .{3});
             self.uci_interface.writeInfo(.Score_cp, "{d}", .{score});
             self.uci_interface.writeInfo(.Pv, "{s}", .{move.toString(self.allocator) catch "??"});
+            self.uci_interface.writeInfo(.Nodes, "{d}", .{self.nodes});
             self.uci_interface.endInfo();
 
             board.undoMove(undo) catch continue;
@@ -59,6 +63,7 @@ pub const ChessBot = struct {
         return moveToPlay;
     }
     fn negaMax(self: *ChessBot, allocator: std.mem.Allocator, board: *ZChess.Board, depth: i32, alpha: i32, beta: i32) i32 {
+        self.nodes += 1;
         if (depth <= 0) return Eval.evaluateBoard(board, board.turn);
         var max: i32 = std.math.minInt(i32);
         var alphaLocal = alpha;
