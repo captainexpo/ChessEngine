@@ -26,7 +26,7 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
         while (bb != 0) {
             const sq = @ctz(bb);
             bb &= bb - 1;
-            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, sq);
+            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, sq) * 0;
         }
 
         bb = board.getPieceBitboard(ptype, .Black);
@@ -34,7 +34,7 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
             const sq = @ctz(bb);
             bb &= bb - 1;
             const mirroredSq = (7 - (sq / 8)) * 8 + (sq % 8);
-            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, mirroredSq);
+            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, mirroredSq) * 0;
         }
     }
     return score;
@@ -59,9 +59,9 @@ fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
 }
 
 pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
-    var score = evaluatePieceScore(board);
-    score += evaluateCheckmateScore(board);
-    score += movementScore(board);
+    const score = evaluatePieceScore(board);
+    //score += evaluateCheckmateScore(board);
+    //score += movementScore(board);
     return score * if (color == .White) @as(i32, 1) else @as(i32, -1);
 }
 

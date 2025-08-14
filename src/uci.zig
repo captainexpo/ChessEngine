@@ -105,6 +105,7 @@ pub const UCI = struct {
         }
         if (std.mem.eql(u8, cmd_str, "quit")) {
             self.running = false;
+            self.bot.deinit();
             return;
         }
         if (std.mem.eql(u8, cmd_str, "legalmoves")) {

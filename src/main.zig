@@ -59,10 +59,7 @@ pub fn runUCI(allocator: std.mem.Allocator) !void {
 
     var uci = try UCI.new(allocator, std.io.getStdOut().writer(), std.io.getStdIn().reader(), &moveGen);
     defer uci.deinit();
-    uci.setBot(Bot.ChessBot{
-        .allocator = allocator,
-        .uci_interface = &uci,
-    });
+    uci.setBot(Bot.ChessBot.new(allocator, &uci));
     try uci.run(); // catch |err| {
     //switch (err) {
     //    error.InvalidCommand => std.debug.print("Error: Invalid Command\n", .{}),
