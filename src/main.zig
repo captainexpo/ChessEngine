@@ -103,8 +103,7 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         defer allocator.free(boardStr);
         std.debug.print("{s}\n", .{boardStr});
 
-        const possibleMoves = try board.getPossibleMoves(allocator);
-        defer allocator.free(possibleMoves);
+        const possibleMoves = try board.getPossibleMoves();
         if (possibleMoves.len == 0) {
             std.debug.print("No legal moves available. Game over.\n", .{});
             break;

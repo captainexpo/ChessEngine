@@ -16,7 +16,7 @@ pub const ChessBot = struct {
     search: Search.Search = undefined,
     nodes: u64 = 0,
 
-    baseDepth: i32 = 0,
+    baseDepth: i32 = 3,
 
     pub fn new(allocator: std.mem.Allocator, interface: *UCI) ChessBot {
         var self = ChessBot{
@@ -38,8 +38,7 @@ pub const ChessBot = struct {
 
     pub fn getMove(self: *ChessBot, board: *ZChess.Board) !ZChess.Move {
         self.nodes = 0;
-        const moves = try board.getPossibleMoves(self.allocator);
-        defer self.allocator.free(moves);
+        const moves = try board.getPossibleMoves();
 
         var rng = RandGen.init(@intCast(std.time.microTimestamp()));
         var moveToPlay = moves[rng.next() % moves.len];
@@ -47,7 +46,7 @@ pub const ChessBot = struct {
         var bestScore: i32 = std.math.minInt(i32);
 
         for (moves) |move| {
-            const undo = board.makeMove(move) catch continue;
+            const undo = board.makeMove(move) catch unreachable;
             const score = -self.search.negaMax(
                 self,
                 self.allocator,
@@ -58,7 +57,7 @@ pub const ChessBot = struct {
                 POS_INF,
             );
 
-            board.undoMove(undo) catch continue;
+            board.undoMove(undo) catch unreachable;
             if (score > bestScore) {
                 bestScore = score;
                 moveToPlay = move;
@@ -68,7 +67,14 @@ pub const ChessBot = struct {
             defer self.allocator.free(moveStr);
             self.uci_interface.startInfo();
             self.uci_interface.writeInfo(.Depth, "{d}", .{self.baseDepth});
-            self.uci_interface.writeInfo(.Score_cp, "{d}", .{score * @as(i32, if (board.turn == .White) 1 else -1)});
+            const score_is_mate = @abs(score) > Eval.MATE_THRESHOLD;
+            if (score_is_mate) {
+                std.debug.print("Score is mate: {d}\n", .{score});
+                const mate_in = Eval.MATE_VALUE - @as(i32, @intCast(@abs(score)));
+                self.uci_interface.writeInfo(.Score_mate, "{d}", .{mate_in});
+            } else {
+                self.uci_interface.writeInfo(.Score_cp, "{d}", .{score});
+            }
             self.uci_interface.writeInfo(.Pv, "{s}", .{moveStr});
             self.uci_interface.writeInfo(.Nodes, "{d}", .{self.nodes});
             self.uci_interface.endInfo();

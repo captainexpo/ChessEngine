@@ -109,8 +109,7 @@ pub const UCI = struct {
             return;
         }
         if (std.mem.eql(u8, cmd_str, "legalmoves")) {
-            const legalMoves = try self.board.getPossibleMoves(self.allocator);
-            defer self.allocator.free(legalMoves);
+            const legalMoves = try self.board.getPossibleMoves();
             for (legalMoves) |move| {
                 const moveStr = try move.toString(self.allocator);
                 defer self.allocator.free(moveStr);

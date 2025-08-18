@@ -6,7 +6,7 @@ const std = @import("std");
 const TTEntry = struct {
     key: u64, // position hash
     move: ZChess.Move, // best move found
-    score: i16, // eval
+    score: i32, // eval
     depth: i8, // depth of search
     flag: u8, // bound type
 };
@@ -83,7 +83,7 @@ pub const Search = struct {
         self.transpositionTable[index] = TTEntry{
             .key = key,
             .move = best_move,
-            .score = @intCast(score),
+            .score = score,
             .depth = @intCast(depth),
             .flag = flag,
         };
@@ -108,32 +108,31 @@ pub const Search = struct {
             }
         }
 
-        if ((depth + @min(depth_extend, 3)) <= 0) {
+        if (depth <= 0) {
             const eval = Eval.evaluateBoard(board, board.turn);
-            const otherEval = Eval.evaluateBoard(board, board.turn.opposite());
-            std.debug.print("Eval: {d} vs {d}\n", .{ eval, otherEval });
             self.storeTT(zobrist, eval, depth, 0, undefined);
             return eval;
         }
 
-        var max: i32 = std.math.minInt(i32);
+        var max: i32 = -Eval.MATE_VALUE * 2;
         var alphaLocal = alpha;
         var bestMove: ZChess.Move = undefined;
 
-        const moves = board.getPossibleMoves(allocator) catch |err| {
+        const moves = board.getPossibleMoves() catch |err| {
             chessBot.writeError("Failed to get possible moves ({!})", .{err});
             return max;
         };
-        defer allocator.free(moves);
         orderMoves(moves, board);
         for (moves, 0..moves.len) |move, _| {
             const undo = board.makeMove(move) catch |err| {
-                chessBot.writeError("Failed to make move ({!})", .{err});
-                continue;
+                chessBot.writeError("Failed to unmake move ({!})", .{err});
+                board.printDebugInfo();
+                std.debug.print("Depth: {d}\n", .{depth});
+                std.debug.print("{s}\n", .{move.toString(allocator) catch "invalid move"});
+                @panic("");
             };
 
-            const orderExtension: i32 = 0; // Extend search for first few moves
-            const score = -self.negaMax(chessBot, allocator, board, depth - 1, depth_extend + orderExtension, -beta, -alphaLocal);
+            const score = -self.negaMax(chessBot, allocator, board, depth - 1, depth_extend, -beta, -alphaLocal);
 
             board.undoMove(undo) catch |err| {
                 chessBot.writeError("Failed to undo move ({!})", .{err});

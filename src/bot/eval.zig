@@ -1,6 +1,10 @@
 const std = @import("std");
 const ZChess = @import("zchess");
 const PST = @import("squaretables.zig");
+
+pub const MATE_VALUE: i32 = 32000;
+pub const MATE_THRESHOLD: i32 = 31000; // Threshold for checkmate evaluation
+
 const pieceValues = [_]i32{
     100, // Pawn
     320, // Knight
@@ -26,7 +30,7 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
         while (bb != 0) {
             const sq = @ctz(bb);
             bb &= bb - 1;
-            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, sq) * 0;
+            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, sq);
         }
 
         bb = board.getPieceBitboard(ptype, .Black);
@@ -34,20 +38,31 @@ fn evaluatePieceScore(board: *ZChess.Board) i32 {
             const sq = @ctz(bb);
             bb &= bb - 1;
             const mirroredSq = (7 - (sq / 8)) * 8 + (sq % 8);
-            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, mirroredSq) * 0;
+            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, mirroredSq);
         }
     }
+
     return score;
 }
 
-fn movementScore(board: *ZChess.Board) i32 {
-    const moves = board.moveGen.generateMoves(std.heap.page_allocator, board, board.turn, .{ .get_pseudo_legal = true }) catch return 0;
-    defer std.heap.page_allocator.free(moves.moves);
-    return @as(i32, @intCast(moves.moves.len)) * @as(i32, if (board.turn == .White) 10 else -10);
+inline fn toRel(val: i32, color: ZChess.Color) i32 {
+    return if (color == .White) val else -val;
 }
+
+fn movementScore(board: *ZChess.Board) i32 {
+    const moves = board.getPossibleMoves() catch unreachable;
+
+    // White’s mobility contributes positively, Black’s negatively
+    var score: i32 = 0;
+    if (board.turn == .White) {
+        score += @intCast(moves.len);
+    } else {
+        score -= @intCast(moves.len);
+    }
+    return score * 10;
+}
+
 fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
-    // Select PST for piece type and return value for square.
-    // Example:
     return switch (ptype) {
         .Pawn => PST.pawnTable[sq],
         .Knight => PST.knightTable[sq],
@@ -58,20 +73,19 @@ fn pieceSquareValue(ptype: ZChess.PieceType, sq: usize) i32 {
     };
 }
 
-pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
-    const score = evaluatePieceScore(board);
-    //score += evaluateCheckmateScore(board);
-    //score += movementScore(board);
-    return score * if (color == .White) @as(i32, 1) else @as(i32, -1);
-}
-
 fn evaluateCheckmateScore(board: *ZChess.Board) i32 {
-    if (board.isInCheckmate) {
-        if (board.turn == .Black) {
-            return 100000;
-        } else {
-            return -100000;
-        }
+    if (board.isInCheckmate() catch return 0) {
+        // If the side to move is checkmated, that’s good for the other side
+        return if (board.turn == .White) -MATE_VALUE else MATE_VALUE;
     }
     return 0;
+}
+
+pub fn evaluateBoard(board: *ZChess.Board, color: ZChess.Color) i32 {
+    var score = evaluateCheckmateScore(board);
+    if (score == 0) {
+        score = evaluatePieceScore(board);
+        score += movementScore(board);
+    }
+    return toRel(score, color);
 }

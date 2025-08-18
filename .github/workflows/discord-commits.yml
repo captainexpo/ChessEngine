@@ -1,0 +1,24 @@
+name: Discord Notifications
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  discord-notifications:
+    name: Discord Notification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Discord Commits
+        uses: Sniddl/discord-commits@v1.6
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          template: "avatar-with-link"
+          include-extras: true
