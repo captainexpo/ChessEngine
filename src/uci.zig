@@ -38,8 +38,10 @@ pub const UCI = struct {
     };
 
     pub fn new(allocator: std.mem.Allocator, stdout: std.fs.File.Writer, stdin: std.fs.File.Reader, moveGen: *ZChess.MoveGen) !UCI {
+        const board = try ZChess.Board.emptyBoard(allocator, moveGen);
         return UCI{
             .allocator = allocator,
+            .board = board,
             .stdout = stdout,
             .stdin = stdin,
             .bot = undefined,
@@ -69,11 +71,11 @@ pub const UCI = struct {
     }
 
     pub fn startInfo(self: *UCI) void {
-        _ = self.stdout.write("info ") catch {};
+        _ = self.stdout.interface.write("info ") catch {};
     }
     pub fn writeInfo(self: *UCI, kind: ?InfoKind, comptime fmt: []const u8, args: anytype) void {
         if (kind) |k| {
-            _ = self.stdout.write(switch (k) {
+            _ = self.stdout.interface.write(switch (k) {
                 .Depth => "depth ",
                 .Score_cp => "score cp ",
                 .Score_mate => "score mate ",
@@ -83,23 +85,27 @@ pub const UCI = struct {
                 .String => "string ",
             }) catch return;
         }
-        _ = self.stdout.print(fmt, args) catch {};
-        _ = self.stdout.write(" ") catch {};
+        _ = self.stdout.interface.print(fmt, args) catch {};
+        _ = self.stdout.interface.write(" ") catch {};
     }
     pub fn endInfo(self: *UCI) void {
-        _ = self.stdout.write("\n") catch {};
+        _ = self.stdout.interface.write("\n") catch {};
+        _ = self.stdout.interface.flush() catch {};
     }
 
     pub fn recieveCommand(self: *UCI, cmd_str: []const u8) !void {
         if (std.mem.eql(u8, cmd_str, "uci")) {
-            _ = try self.stdout.write("uciok\n");
+            _ = try self.stdout.interface.write("uciok\n");
+            try self.stdout.interface.flush();
             return;
         }
         if (std.mem.eql(u8, cmd_str, "isready")) {
-            _ = try self.stdout.write("readyok\n");
+            _ = try self.stdout.interface.write("readyok\n");
+            try self.stdout.interface.flush();
             return;
         }
         if (std.mem.eql(u8, cmd_str, "ucinewgame")) {
+            self.board.deinit();
             self.board = try ZChess.Board.emptyBoard(self.allocator, self.moveGen);
             return;
         }
@@ -113,9 +119,12 @@ pub const UCI = struct {
             for (legalMoves) |move| {
                 const moveStr = try move.toString(self.allocator);
                 defer self.allocator.free(moveStr);
-                _ = try self.stdout.print("{s}\n", .{moveStr});
+                _ = try self.stdout.interface.print("{s}\n", .{moveStr});
             }
             return;
+        }
+        if (std.mem.eql(u8, cmd_str, "debuginfo")) {
+            self.board.printDebugInfo();
         }
         var tokenized = std.mem.tokenizeAny(u8, cmd_str, " ");
         const first = tokenized.next() orelse {
@@ -139,17 +148,95 @@ pub const UCI = struct {
             }
         }
         if (std.mem.eql(u8, first, "go")) {
-            const move = try self.bot.getMove(&self.board);
+            var requested_depth: ?i32 = null;
+            var movetime_ms: i64 = 0;
+            var wtime_ms: ?i64 = null;
+            var btime_ms: ?i64 = null;
+            var winc_ms: i64 = 0;
+            var binc_ms: i64 = 0;
+            var moves_to_go: ?i64 = null;
+
+            while (tokenized.next()) |arg| {
+                if (std.mem.eql(u8, arg, "depth")) {
+                    if (tokenized.next()) |depth_str| {
+                        requested_depth = std.fmt.parseInt(i32, depth_str, 10) catch requested_depth;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "movetime")) {
+                    if (tokenized.next()) |time_str| {
+                        movetime_ms = std.fmt.parseInt(i64, time_str, 10) catch movetime_ms;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "wtime")) {
+                    if (tokenized.next()) |time_str| {
+                        wtime_ms = std.fmt.parseInt(i64, time_str, 10) catch wtime_ms;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "btime")) {
+                    if (tokenized.next()) |time_str| {
+                        btime_ms = std.fmt.parseInt(i64, time_str, 10) catch btime_ms;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "winc")) {
+                    if (tokenized.next()) |time_str| {
+                        winc_ms = std.fmt.parseInt(i64, time_str, 10) catch winc_ms;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "binc")) {
+                    if (tokenized.next()) |time_str| {
+                        binc_ms = std.fmt.parseInt(i64, time_str, 10) catch binc_ms;
+                    }
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "movestogo")) {
+                    if (tokenized.next()) |move_str| {
+                        moves_to_go = std.fmt.parseInt(i64, move_str, 10) catch moves_to_go;
+                    }
+                    continue;
+                }
+            }
+
+            var time_budget_ms = movetime_ms;
+            if (time_budget_ms <= 0) {
+                const remaining = if (self.board.turn == .White) wtime_ms else btime_ms;
+                const increment = if (self.board.turn == .White) winc_ms else binc_ms;
+                if (remaining) |rem| {
+                    const moves_left = moves_to_go orelse 30;
+                    var budget = @divTrunc(rem, @max(@as(i64, 1), moves_left)) + @divTrunc(increment * 7, 10);
+                    budget -= 50;
+                    if (budget < 10) budget = 10;
+                    if (budget > @divTrunc(rem, 2)) budget = @divTrunc(rem, 2);
+                    time_budget_ms = budget;
+                }
+            }
+
+            const no_explicit_limits = requested_depth == null and movetime_ms <= 0 and wtime_ms == null and btime_ms == null;
+            const move = if (no_explicit_limits)
+                try self.bot.getMove(&self.board)
+            else
+                try self.bot.getMoveWithLimits(&self.board, time_budget_ms, requested_depth);
 
             const moveStr = try move.toString(self.allocator);
             defer self.allocator.free(moveStr);
-            _ = try self.stdout.print("bestmove {s}\n", .{moveStr});
+            _ = try self.stdout.interface.print("bestmove {s}\n", .{moveStr});
+            try self.stdout.interface.flush();
 
             const classified = try self.board.classifyMove(move);
             _ = try self.board.makeMove(classified);
 
             afterGoCommand(self) catch |err| {
-                std.debug.print("Error after go command: {!}\n", .{err});
+                std.debug.print("Error after go command: {}\n", .{err});
             };
             return;
         }
@@ -158,16 +245,19 @@ pub const UCI = struct {
     pub fn run(self: *UCI) !void {
         self.running = true;
         while (self.running) {
-            const line = try self.stdin.readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024) orelse {
-                // EOF
-                self.running = false;
-                continue;
-            };
-            defer self.allocator.free(line);
+            var line_alloc = std.Io.Writer.Allocating.init(self.allocator);
+            defer line_alloc.deinit();
 
-            if (line.len == 0) {
-                continue; // EOF or empty line
-            }
+            const read_len = self.stdin.interface.streamDelimiter(&line_alloc.writer, '\n') catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            };
+
+            const line = try line_alloc.toOwnedSlice();
+            defer self.allocator.free(line);
+            self.stdin.interface.toss(1);
+
+            if (read_len == 0) continue;
             const cmd_str = std.mem.trim(u8, line, "\r\n");
 
             try self.recieveCommand(cmd_str);

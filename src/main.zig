@@ -57,21 +57,28 @@ test "stripping" {
 pub fn runUCI(allocator: std.mem.Allocator) !void {
     var moveGen = ZChess.MoveGen.initMoveGeneration();
 
-    var uci = try UCI.new(allocator, std.io.getStdOut().writer(), std.io.getStdIn().reader(), &moveGen);
+    const stdin_file = std.fs.File.stdin();
+    var stdout_buffer: [4096]u8 = undefined;
+    const stdout = std.fs.File.stdout().writerStreaming(&stdout_buffer);
+
+    var stdin_buffer: [4096]u8 = undefined;
+    const stdin = stdin_file.readerStreaming(&stdin_buffer);
+
+    var uci = try UCI.new(allocator, stdout, stdin, &moveGen);
     defer uci.deinit();
     uci.setBot(Bot.ChessBot.new(allocator, &uci));
-    try uci.run(); // catch |err| {
-    //switch (err) {
-    //    error.InvalidCommand => std.debug.print("Error: Invalid Command\n", .{}),
-    //    error.InvalidOption => std.debug.print("Error: Invalid Option\n", .{}),
-    //    error.InvalidPosition => std.debug.print("Error: Invalid Position\n", .{}),
-    //    error.InvalidMove => std.debug.print("Error: Invalid Move\n", .{}),
-    //    error.NotReady => std.debug.print("Error: Not Ready\n", .{}),
-    //    error.UnknownError => std.debug.print("Error: Unknown Error\n", .{}),
-    //    error.UnknownCommand => std.debug.print("Error: Unknown Command\n", .{}),
-    //    else => std.debug.print("Error: {!}\n", .{err}),
-    //}
-    //};
+    uci.run() catch |err| {
+        switch (err) {
+            error.InvalidCommand => std.debug.print("Error: Invalid Command\n", .{}),
+            error.InvalidOption => std.debug.print("Error: Invalid Option\n", .{}),
+            error.InvalidPosition => std.debug.print("Error: Invalid Position\n", .{}),
+            error.InvalidMove => std.debug.print("Error: Invalid Move\n", .{}),
+            error.NotReady => std.debug.print("Error: Not Ready\n", .{}),
+            error.UnknownError => std.debug.print("Error: Unknown Error\n", .{}),
+            error.UnknownCommand => std.debug.print("Error: Unknown Command\n", .{}),
+            else => std.debug.print("Error: {}\n", .{err}),
+        }
+    };
 }
 
 fn eqlMove(a: ZChess.Move, b: ZChess.Move) bool {
@@ -94,7 +101,9 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
     var board = try ZChess.Board.emptyBoard(allocator, &moveGen);
     defer board.deinit();
 
-    var stdin = std.io.getStdIn().reader();
+    const stdin_file = std.fs.File.stdin();
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin_reader = stdin_file.readerStreaming(&stdin_buffer);
 
     try board.loadFEN(fenStr);
     var undo: ?ZChess.Board.MoveUndo = null;
@@ -110,7 +119,14 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
         }
 
         std.debug.print("{s}'s move: ", .{@tagName(board.turn)});
-        const rawMoveStr = try stdin.readUntilDelimiterAlloc(allocator, '\n', 2048);
+
+        var rms_alloc = std.Io.Writer.Allocating.init(allocator);
+        defer rms_alloc.deinit();
+
+        _ = try stdin_reader.interface.streamDelimiter(&rms_alloc.writer, '\n');
+        stdin_reader.interface.toss(1);
+
+        const rawMoveStr = try rms_alloc.toOwnedSlice();
         defer allocator.free(rawMoveStr);
 
         const moveStr = stripWhitespace(rawMoveStr);
@@ -142,7 +158,7 @@ pub fn runCliGame(allocator: std.mem.Allocator, fenStr: []const u8) !void {
 
         const classified = try board.classifyMove(move);
         undo = board.makeMove(classified) catch |err| {
-            std.debug.print("Failed to make move: {!}\n", .{err});
+            std.debug.print("Failed to make move: {}\n", .{err});
             continue;
         };
     }
@@ -153,9 +169,11 @@ pub fn printHelp() void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    // defer _ = gpa.deinit();
+    // const allocator = gpa.allocator();
+
+    const allocator = std.heap.page_allocator;
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
