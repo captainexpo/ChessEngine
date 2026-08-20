@@ -300,7 +300,7 @@ pub const Search = struct {
         }
 
         var local_moves: [256]ZChess.Move = undefined;
-1 reply
+
         var heap_moves: ?[]ZChess.Move = null;
         defer if (heap_moves) |hm| allocator.free(hm);
 
