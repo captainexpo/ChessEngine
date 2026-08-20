@@ -13,16 +13,19 @@ pub const ChessBot = struct {
     search: Search.Search = undefined,
     nodes: u64 = 0,
 
-    defaultDepth: i32 = 7,
-    maxDepth: i32 = 8,
+    maxDepth: i32 = 16,
 
-    pub fn new(allocator: std.mem.Allocator, interface: *UCI) ChessBot {
+    io: std.Io = undefined,
+    search_started_ts: std.Io.Timestamp = undefined,
+
+    pub fn new(allocator: std.mem.Allocator, interface: *UCI, io: std.Io) ChessBot {
         var self = ChessBot{
             .allocator = allocator,
             .uci_interface = interface,
+            .io = io,
         };
 
-        self.search = Search.Search.init(allocator, 1 << 20) catch |err| {
+        self.search = Search.Search.init(allocator, 1 << 21) catch |err| {
             self.writeError("Failed to initialize search: {}", .{err});
             std.process.exit(1);
         };
@@ -40,6 +43,10 @@ pub const ChessBot = struct {
         const moveStr = try moveToPlay.toString(self.allocator);
         defer self.allocator.free(moveStr);
 
+        const elapsed_ms = self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds();
+        const elapsed_ms_safe = @max(elapsed_ms, 1);
+        const nps: u64 = @intCast(@divTrunc(@as(i64, @intCast(self.nodes)) * 1000, elapsed_ms_safe));
+
         self.uci_interface.startInfo();
         self.uci_interface.writeInfo(.Depth, "{d}", .{depth});
 
@@ -53,14 +60,16 @@ pub const ChessBot = struct {
             self.uci_interface.writeInfo(.Score_cp, "{d}", .{bestScore});
         }
 
-        self.uci_interface.writeInfo(.Pv, "{s}", .{moveStr});
         self.uci_interface.writeInfo(.Nodes, "{d}", .{self.nodes});
+        self.uci_interface.writeInfo(.Nps, "{d}", .{nps});
+        self.uci_interface.writeInfo(.Time, "{d}", .{elapsed_ms});
+        self.uci_interface.writeInfo(.Pv, "{s}", .{moveStr});
         self.uci_interface.endInfo();
 
         _ = board;
     }
 
-    pub fn getMoveWithLimits(self: *ChessBot, board: *ZChess.Board, time_budget_ms: i64, requested_depth: ?i32) !ZChess.Move {
+    pub fn getMoveWithLimits(self: *ChessBot, board: *ZChess.Board, time_budget_ms: i64, requested_depth: ?i32, emit_info: bool) !ZChess.Move {
         self.nodes = 0;
         const moves = try board.getPossibleMoves();
         if (moves.len == 0) return error.NoLegalMoves;
@@ -70,8 +79,9 @@ pub const ChessBot = struct {
 
         var moveToPlay = root_moves[0];
 
-        const started_ms = std.time.milliTimestamp();
-        const depth_target = @min(requested_depth orelse self.defaultDepth, self.maxDepth);
+        self.search_started_ts = std.Io.Clock.now(.awake, self.io);
+
+        const depth_target = if (requested_depth) |d| @min(d, self.maxDepth) else self.maxDepth;
 
         var bestScore: i32 = 0;
         var completed_depth: i32 = 0;
@@ -79,7 +89,7 @@ pub const ChessBot = struct {
 
         var depth: i32 = 1;
         while (depth <= depth_target) : (depth += 1) {
-            if (time_budget_ms > 0 and (std.time.milliTimestamp() - started_ms) >= time_budget_ms and completed_depth > 0) break;
+            if (time_budget_ms > 0 and (self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds()) >= time_budget_ms and completed_depth > 0) break;
 
             var aspiration_window: i32 = if (depth == 1) 0 else 30;
             var alpha = if (depth == 1) NEG_INF else bestScore - aspiration_window;
@@ -88,12 +98,12 @@ pub const ChessBot = struct {
             var iter_best_move: ?ZChess.Move = null;
 
             while (true) {
-                const result = self.search.searchRoot(self, self.allocator, board, depth, alpha, beta, pvMove);
+                const result = self.search.searchRoot(self, self.allocator, board, depth, alpha, beta, pvMove, emit_info);
                 iter_best_score = result.score;
                 iter_best_move = result.best_move;
 
                 if (iter_best_score <= alpha) {
-                    if (time_budget_ms > 0 and (std.time.milliTimestamp() - started_ms) >= time_budget_ms) break;
+                    if (time_budget_ms > 0 and (self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds()) >= time_budget_ms) break;
                     aspiration_window *= 2;
                     alpha = @max(NEG_INF, bestScore - aspiration_window);
                     beta = bestScore + aspiration_window;
@@ -101,7 +111,7 @@ pub const ChessBot = struct {
                 }
 
                 if (iter_best_score >= beta) {
-                    if (time_budget_ms > 0 and (std.time.milliTimestamp() - started_ms) >= time_budget_ms) break;
+                    if (time_budget_ms > 0 and (self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds()) >= time_budget_ms) break;
                     aspiration_window *= 2;
                     alpha = bestScore - aspiration_window;
                     beta = @min(POS_INF, bestScore + aspiration_window);
@@ -140,9 +150,6 @@ pub const ChessBot = struct {
             }
         }
 
-        if (completed_depth == 0) completed_depth = 1;
-        _ = self.reportSearchInfo(board, completed_depth, bestScore, moveToPlay) catch {};
-
         return moveToPlay;
     }
 
@@ -156,7 +163,7 @@ pub const ChessBot = struct {
             };
             return e4;
         }
-        return self.getMoveWithLimits(board, 0, null);
+        return self.getMoveWithLimits(board, 4000, null, true);
     }
 
     pub fn deinit(self: *ChessBot) void {

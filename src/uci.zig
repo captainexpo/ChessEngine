@@ -18,8 +18,8 @@ const startposition: []const u8 = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w
 pub const UCI = struct {
     allocator: std.mem.Allocator,
     board: ZChess.Board = undefined,
-    stdout: std.fs.File.Writer,
-    stdin: std.fs.File.Reader,
+    stdout: std.Io.File.Writer,
+    stdin: std.Io.File.Reader,
 
     moveGen: *ZChess.MoveGen,
 
@@ -33,11 +33,12 @@ pub const UCI = struct {
         Score_mate,
         Nodes,
         Nps,
+        Time,
         String,
         Pv,
     };
 
-    pub fn new(allocator: std.mem.Allocator, stdout: std.fs.File.Writer, stdin: std.fs.File.Reader, moveGen: *ZChess.MoveGen) !UCI {
+    pub fn new(allocator: std.mem.Allocator, stdout: std.Io.File.Writer, stdin: std.Io.File.Reader, moveGen: *ZChess.MoveGen) !UCI {
         const board = try ZChess.Board.emptyBoard(allocator, moveGen);
         return UCI{
             .allocator = allocator,
@@ -81,6 +82,7 @@ pub const UCI = struct {
                 .Score_mate => "score mate ",
                 .Nodes => "nodes ",
                 .Nps => "nps ",
+                .Time => "time ",
                 .Pv => "pv ",
                 .String => "string ",
             }) catch return;
@@ -225,7 +227,7 @@ pub const UCI = struct {
             const move = if (no_explicit_limits)
                 try self.bot.getMove(&self.board)
             else
-                try self.bot.getMoveWithLimits(&self.board, time_budget_ms, requested_depth);
+                try self.bot.getMoveWithLimits(&self.board, time_budget_ms, requested_depth, true);
 
             const moveStr = try move.toString(self.allocator);
             defer self.allocator.free(moveStr);

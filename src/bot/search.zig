@@ -109,22 +109,28 @@ pub const Search = struct {
         self.history[c_idx][p_idx][to_sq] = @min(1_000_000, current + bonus);
     }
 
+    const ScoredMove = struct { move: ZChess.Move, score: i32 };
+
     pub fn orderMoves(self: *Search, moves: []ZChess.Move, board: *ZChess.Board, hashMove: ?ZChess.Move, ply: usize) void {
-        const Context = struct {
-            self: *Search,
-            board: *ZChess.Board,
-            hashMove: ?ZChess.Move,
-            ply: usize,
-        };
+        if (moves.len <= 1) return;
+
+        var buf: [256]ScoredMove = undefined;
+        const scored = buf[0..moves.len];
+        for (moves, 0..) |move, i| {
+            scored[i] = .{ .move = move, .score = self.scoreMove(board, move, hashMove, ply) };
+        }
 
         const lessThan = struct {
-            fn lessThan(context: Context, lhs: ZChess.Move, rhs: ZChess.Move) bool {
-                return context.self.scoreMove(context.board, lhs, context.hashMove, context.ply) >
-                    context.self.scoreMove(context.board, rhs, context.hashMove, context.ply);
+            fn lessThan(_: void, lhs: ScoredMove, rhs: ScoredMove) bool {
+                return lhs.score > rhs.score;
             }
         }.lessThan;
 
-        std.sort.heap(ZChess.Move, moves, Context{ .self = self, .board = board, .hashMove = hashMove, .ply = ply }, lessThan);
+        std.sort.pdq(ScoredMove, scored, {}, lessThan);
+
+        for (scored, 0..) |sm, i| {
+            moves[i] = sm.move;
+        }
     }
 
     pub fn init(allocator: std.mem.Allocator, size: usize) !Search {
@@ -216,27 +222,20 @@ pub const Search = struct {
             if (stand_pat > alphaLocal) alphaLocal = stand_pat;
         }
 
-        var local_moves: [256]ZChess.Move = undefined;
-        var heap_moves: ?[]ZChess.Move = null;
-        defer if (heap_moves) |hm| allocator.free(hm);
-
-        const noisy_moves = blk: {
-            if (moves.len <= local_moves.len) {
-                @memcpy(local_moves[0..moves.len], moves);
-                break :blk local_moves[0..moves.len];
+        var noisy_buf: [256]ZChess.Move = undefined;
+        var noisy_len: usize = 0;
+        for (moves) |move| {
+            if (in_check or move.isCapture() or move.promotion_piecetype != null) {
+                if (noisy_len < noisy_buf.len) {
+                    noisy_buf[noisy_len] = move;
+                    noisy_len += 1;
+                }
             }
-
-            const hm = allocator.dupe(ZChess.Move, moves) catch return alphaLocal;
-            heap_moves = hm;
-            break :blk hm;
-        };
+        }
+        const noisy_moves = noisy_buf[0..noisy_len];
 
         self.orderMoves(noisy_moves, board, null, plyIndex(ply));
         for (noisy_moves) |move| {
-            if (!in_check and !(move.isCapture() or move.promotion_piecetype != null)) {
-                continue;
-            }
-
             const undo = board.makeMove(move) catch continue;
             const score = -self.quiescence(chessBot, allocator, board, -beta, -alphaLocal, ply + 1);
             board.undoMove(undo) catch continue;
@@ -273,6 +272,10 @@ pub const Search = struct {
         chessBot.nodes += 1;
         const zobrist = board.getZobristHash();
 
+        if (board.isInStalemate() catch false) {
+            return @divTrunc(Eval.evaluateBoard(board, board.turn), 8);
+        }
+
         if (depth <= 0) {
             return self.quiescence(chessBot, allocator, board, alpha, beta, ply);
         }
@@ -297,6 +300,7 @@ pub const Search = struct {
         }
 
         var local_moves: [256]ZChess.Move = undefined;
+1 reply
         var heap_moves: ?[]ZChess.Move = null;
         defer if (heap_moves) |hm| allocator.free(hm);
 
@@ -317,7 +321,7 @@ pub const Search = struct {
         };
 
         self.orderMoves(ordered_moves, board, tt_move, plyIndex(ply));
-        for (ordered_moves) |move| {
+        for (ordered_moves, 0..) |move, move_index| {
             const undo = board.makeMove(move) catch |err| {
                 chessBot.writeError("Failed to make move ({})", .{err});
                 return max;
@@ -339,7 +343,19 @@ pub const Search = struct {
             // if (move.promotion_piecetype != null) newDepth += 1;
             if (newDepth > depth) newDepth = depth;
 
-            const score = -self.searchNode(chessBot, allocator, board, newDepth, -beta, -alphaLocal, ply + 1);
+            var search_depth = newDepth;
+            const is_quiet = !move.isCapture() and move.promotion_piecetype == null and move.move_type != .Castle;
+            if (!node_in_check and is_quiet and depth >= 3 and move_index >= 3 and search_depth > 1) {
+                search_depth -= 1;
+            }
+            if (!node_in_check and is_quiet and depth >= 5 and move_index >= 8 and search_depth > 2) {
+                search_depth -= 1;
+            }
+
+            var score = -self.searchNode(chessBot, allocator, board, search_depth, -beta, -alphaLocal, ply + 1);
+            if (search_depth < newDepth and score > alphaLocal) {
+                score = -self.searchNode(chessBot, allocator, board, newDepth, -beta, -alphaLocal, ply + 1);
+            }
 
             board.undoMove(undo) catch |err| {
                 chessBot.writeError("Failed to undo move ({})", .{err});
@@ -381,6 +397,7 @@ pub const Search = struct {
         alpha: i32,
         beta: i32,
         hashMove: ?ZChess.Move,
+        emit_info: bool,
     ) SearchResult {
         const moves = board.getPossibleMoves() catch |err| {
             chessBot.writeError("Failed to get possible moves ({})", .{err});
@@ -431,12 +448,13 @@ pub const Search = struct {
             if (score > bestScore) {
                 bestScore = score;
                 bestMove = move;
-            }
 
-            // Report on move scores at the root for debugging
-            chessBot.reportSearchInfo(board, depth, score, move) catch |err| {
-                chessBot.writeError("Failed to report search info ({})", .{err});
-            };
+                if (emit_info) {
+                    chessBot.reportSearchInfo(board, depth, score, move) catch |err| {
+                        chessBot.writeError("Failed to report search info ({})", .{err});
+                    };
+                }
+            }
 
             if (score > alphaLocal) alphaLocal = score;
             if (alphaLocal >= beta) break;
