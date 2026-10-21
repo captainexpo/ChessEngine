@@ -8,12 +8,14 @@ const NEG_INF = std.math.minInt(i32) + 1;
 const POS_INF = std.math.maxInt(i32);
 
 pub const ChessBot = struct {
+    maxTimeMs: i32 = 6000,
+
     allocator: std.mem.Allocator,
     uci_interface: *UCI,
     search: Search.Search = undefined,
     nodes: u64 = 0,
 
-    maxDepth: i32 = 10,
+    maxDepth: i32 = 20,
 
     io: std.Io = undefined,
     search_started_ts: std.Io.Timestamp = undefined,

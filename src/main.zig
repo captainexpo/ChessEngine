@@ -181,7 +181,7 @@ pub fn runBench(allocator: std.mem.Allocator, depth: i32, io: std.Io) !void {
         try board.loadFEN(position.fen);
 
         const started_ts = std.Io.Clock.now(.awake, io);
-        const move = try uci.bot.getMoveWithLimits(&board, 0, bench_depth, false);
+        const move = try uci.bot.getMoveWithLimits(&board, 6000, bench_depth, false);
         const elapsed_duration = started_ts.durationTo(std.Io.Clock.now(.awake, io));
 
         const elapsed_ns: i128 = @intCast(elapsed_duration.toNanoseconds());

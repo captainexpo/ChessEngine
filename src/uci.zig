@@ -228,7 +228,7 @@ pub const UCI = struct {
             const move = if (no_explicit_limits)
                 try self.bot.getMove(&self.board)
             else
-                try self.bot.getMoveWithLimits(&self.board, time_budget_ms, requested_depth, true);
+                try self.bot.getMoveWithLimits(&self.board, @min(time_budget_ms, self.bot.maxTimeMs), requested_depth, true);
 
             const moveStr = try move.toString(self.allocator);
             defer self.allocator.free(moveStr);
