@@ -14,7 +14,7 @@ The engine's search function is based around the Negamax algorithm. However, it 
 4. Null-move pruning: Search skips analysis of nodes where the opponent has made an obvious mistake as details of the refutaion don't really matter.
 5. Move ordering: Searches potentially more powerful moves first (e.g. promotions, captures, checks) so that alpha-beta pruning can be more effective, faster.
 6. Killer moves: Keeps track of moves that are exceptionally powerful and stores them for later just in case they may work again.
-7. Asperation windows:
+7. Asperation windows: Guesses that the evaluation of deeper positions will be close to the evaluations of shallower positions
 
 ### Eval
 
@@ -37,5 +37,5 @@ To compile a debug build, run `zig build`. To compile a release build, run `zig 
 
 The engine speaks the [UCI protocol](https://en.wikipedia.org/wiki/Universal_Chess_Interface), so it can be used with any UCI-compatible chess GUI (e.g. Cute Chess, Arena, Banksia). I personally like [Cute Chess](https://www.cutechess.com/).
 
-To start a game in the terminal, run `zig build run` or the raw executable.
+To start a game in the terminal, run `zig build run` or run the raw executable.
 
