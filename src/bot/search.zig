@@ -46,6 +46,8 @@ pub const Search = struct {
     ttableSize: usize,
     allocator: std.mem.Allocator,
     killers: [MAX_PLY][KILLER_SLOTS]?ZChess.Move,
+
+    // [color][piece type][to square] => eval
     history: [2][6][64]i32,
 
     fn scoreMove(self: *Search, board: *ZChess.Board, move: ZChess.Move, hashMove: ?ZChess.Move, ply: usize) i32 {
@@ -106,7 +108,7 @@ pub const Search = struct {
         const to_sq = move.to_square.toFlat();
         const bonus = depth * depth;
         const current = self.history[c_idx][p_idx][to_sq];
-        self.history[c_idx][p_idx][to_sq] = @min(1_000_000, current + bonus);
+        self.history[c_idx][p_idx][to_sq] = @min(40_000, current + bonus);
     }
 
     const ScoredMove = struct { move: ZChess.Move, score: i32 };
@@ -161,20 +163,22 @@ pub const Search = struct {
     fn probeTTEntry(self: *Search, key: u64, depth: i32) ?TTEntry {
         const index: usize = key & (@as(u64, @intCast(self.ttableSize - 1)));
         const entry = self.transpositionTable[index];
-        if (entry.key == key and entry.depth >= depth) {
+        if (entry.key == key) {
             return entry;
         }
+        _ = depth;
         return null;
     }
 
-    fn probeTT(self: *Search, key: u64, depth: i32, alpha: i32, beta: i32) ?i32 {
+    fn probeTT(self: *Search, key: u64, depth: i32, alpha: i32, beta: i32, ply: i32) ?i32 {
         const index: usize = key & (@as(u64, @intCast(self.ttableSize - 1)));
         const entry = self.transpositionTable[index];
+        const score = denormalizeMateScore(entry.score, ply);
         if (entry.key == key and entry.depth >= depth) {
             switch (entry.flag) {
-                0 => return entry.score,
-                1 => if (entry.score <= alpha) return alpha,
-                2 => if (entry.score >= beta) return beta,
+                0 => return score,
+                1 => if (score <= alpha) return alpha,
+                2 => if (score >= beta) return beta,
                 else => {},
             }
         }
@@ -215,10 +219,9 @@ pub const Search = struct {
         const stand_pat = Eval.evaluateBoard(board, board.turn);
 
         var alphaLocal = alpha;
+        // No standing pat in check: every evasion is searched, so mates aren't hidden
         if (!in_check) {
             if (stand_pat >= beta) return beta;
-            if (stand_pat > alphaLocal) alphaLocal = stand_pat;
-        } else {
             if (stand_pat > alphaLocal) alphaLocal = stand_pat;
         }
 
@@ -268,11 +271,14 @@ pub const Search = struct {
         alpha: i32,
         beta: i32,
         ply: i32,
+        allow_null: bool,
     ) i32 {
         chessBot.nodes += 1;
         const zobrist = board.getZobristHash();
 
         if (board.isInStalemate() catch false) {
+            // Checkmate takes precedence over the 50-move rule
+            if (board.isInCheckmate() catch false) return -Eval.MATE_VALUE + ply;
             return @divTrunc(Eval.evaluateBoard(board, board.turn), 8);
         }
 
@@ -280,8 +286,8 @@ pub const Search = struct {
             return self.quiescence(chessBot, allocator, board, alpha, beta, ply);
         }
 
-        if (self.probeTT(zobrist, depth, alpha, beta)) |cached| {
-            return denormalizeMateScore(cached, ply);
+        if (self.probeTT(zobrist, depth, alpha, beta, ply)) |cached| {
+            return cached;
         }
 
         var max: i32 = -Eval.MATE_VALUE * 2;
@@ -289,6 +295,16 @@ pub const Search = struct {
         var bestMove: ?ZChess.Move = null;
         const node_in_check = board.isInCheck() catch false;
         const side_to_move = board.turn;
+
+        // Skipped near mate scores: a null-move cutoff there would claim an unproven mate
+        const beta_is_mate = beta >= Eval.MATE_THRESHOLD or beta <= -Eval.MATE_THRESHOLD;
+        if (allow_null and !node_in_check and !beta_is_mate and depth >= 3 and board.hasNonPawnMaterial(board.turn)) {
+            const R = 2;
+            const null_undo = board.makeNullMove();
+            const null_score = -self.searchNode(chessBot, allocator, board, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
+            board.undoNullMove(null_undo);
+            if (null_score >= beta) return beta;
+        }
 
         const moves = board.getPossibleMoves() catch |err| {
             chessBot.writeError("Failed to get possible moves ({})", .{err});
@@ -352,9 +368,9 @@ pub const Search = struct {
                 search_depth -= 1;
             }
 
-            var score = -self.searchNode(chessBot, allocator, board, search_depth, -beta, -alphaLocal, ply + 1);
+            var score = -self.searchNode(chessBot, allocator, board, search_depth, -beta, -alphaLocal, ply + 1, true);
             if (search_depth < newDepth and score > alphaLocal) {
-                score = -self.searchNode(chessBot, allocator, board, newDepth, -beta, -alphaLocal, ply + 1);
+                score = -self.searchNode(chessBot, allocator, board, newDepth, -beta, -alphaLocal, ply + 1, true);
             }
 
             board.undoMove(undo) catch |err| {
@@ -438,7 +454,7 @@ pub const Search = struct {
                 continue;
             };
 
-            const score = -self.searchNode(chessBot, allocator, board, depth - 1, -beta, -alphaLocal, 1);
+            const score = -self.searchNode(chessBot, allocator, board, depth - 1, -beta, -alphaLocal, 1, true);
 
             board.undoMove(undo) catch |err| {
                 chessBot.writeError("Failed to undo move ({})", .{err});
@@ -449,7 +465,8 @@ pub const Search = struct {
                 bestScore = score;
                 bestMove = move;
 
-                if (emit_info) {
+                // Scores outside the aspiration window are only bounds, not real scores
+                if (emit_info and score > alpha and score < beta) {
                     chessBot.reportSearchInfo(board, depth, score, move) catch |err| {
                         chessBot.writeError("Failed to report search info ({})", .{err});
                     };

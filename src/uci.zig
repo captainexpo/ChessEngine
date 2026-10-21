@@ -127,6 +127,7 @@ pub const UCI = struct {
         }
         if (std.mem.eql(u8, cmd_str, "debuginfo")) {
             self.board.printDebugInfo();
+            return;
         }
         var tokenized = std.mem.tokenizeAny(u8, cmd_str, " ");
         const first = tokenized.next() orelse {
@@ -234,9 +235,6 @@ pub const UCI = struct {
             _ = try self.stdout.interface.print("bestmove {s}\n", .{moveStr});
             try self.stdout.interface.flush();
 
-            const classified = try self.board.classifyMove(move);
-            _ = try self.board.makeMove(classified);
-
             afterGoCommand(self) catch |err| {
                 std.debug.print("Error after go command: {}\n", .{err});
             };
@@ -262,7 +260,10 @@ pub const UCI = struct {
             if (read_len == 0) continue;
             const cmd_str = std.mem.trim(u8, line, "\r\n");
 
-            try self.recieveCommand(cmd_str);
+            self.recieveCommand(cmd_str) catch |err| {
+                self.stdout.interface.print("Error: {}\n", .{err}) catch return UCIError.UnknownError;
+                self.stdout.interface.flush() catch return UCIError.UnknownError;
+            };
         }
     }
 

@@ -22,12 +22,21 @@ const ptypes = [_]ZChess.PieceType{
     .Queen,
 };
 
+const ptypes_all = [_]ZChess.PieceType{
+    .Pawn,
+    .Knight,
+    .Bishop,
+    .Rook,
+    .Queen,
+    .King,
+};
+
 fn squareIndex(file: usize, rank: usize) u8 {
     return @intCast(rank * 8 + file);
 }
 
 fn evaluatePassedPawns(board: *ZChess.Board) i32 {
-    _ = board; // TODO: Implement passed pawn evaluation logic
+    _ = board; // TODO: Implement passed pawn evaluation bitboard logic
     return 0;
 }
 
@@ -41,7 +50,7 @@ fn evaluateCenterPawnPresence(board: *ZChess.Board, color: ZChess.Color) i32 {
 
     const bb = board.getPieceBitboard(.Pawn, color);
 
-    const centerFiles: [3]usize = .{ 3, 4, 5 };
+    const centerFiles: [3]usize = .{ 2, 3, 4 };
 
     for (centerFiles) |file| {
         if ((bb & (@as(u64, 1) << @intCast(squareIndex(file, home_rank)))) != 0) {
@@ -68,20 +77,31 @@ fn evaluateOpeningCenterControl(board: *ZChess.Board) i32 {
 fn evaluatePieceScore(board: *ZChess.Board) i32 {
     var score: i32 = 0;
 
-    inline for (ptypes) |ptype| {
+    inline for (ptypes_all) |ptype| {
         var bb = board.getPieceBitboard(ptype, .White);
         while (bb != 0) {
             const sq = @ctz(bb);
             bb &= bb - 1;
-            score += pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, board, sq);
+
+            // More valuable piece = better eval
+            score += pieceValues[@intFromEnum(ptype)];
+            // Better position = better eval (xor due to inverted piece tables)
+            score += pieceSquareValue(ptype, board, sq ^ 56);
+            // Sees more squares = better eval
+            score += @divFloor(@popCount(board.moveGen.getPossibleAttacksBitboard(board, .White)), 10);
         }
 
         bb = board.getPieceBitboard(ptype, .Black);
         while (bb != 0) {
             const sq = @ctz(bb);
             bb &= bb - 1;
-            const mirroredSq = (7 - (sq / 8)) * 8 + (sq % 8);
-            score -= pieceValues[@intFromEnum(ptype)] + pieceSquareValue(ptype, board, mirroredSq);
+
+            // More valuable piece = better eval
+            score -= pieceValues[@intFromEnum(ptype)];
+            // Better position = better eval
+            score -= pieceSquareValue(ptype, board, sq);
+            // Sees more squares = better eval
+            score -= @divFloor(@popCount(board.moveGen.getPossibleAttacksBitboard(board, .Black)), 10);
         }
     }
 
@@ -109,9 +129,30 @@ fn pieceSquareValue(ptype: ZChess.PieceType, board: *ZChess.Board, sq: usize) i3
     };
 }
 
+fn squareFromBitboard(b: u64) ZChess.Square {
+    std.debug.assert(b != 0);
+    return ZChess.Square.fromFlat(@intCast(@ctz(b)));
+}
+
 fn endgameEvaluation(board: *ZChess.Board) i32 {
-    _ = board; // Placeholder for future endgame-specific evaluation logic
-    return 0;
+    // Simple endgame evaluation.
+    // 1. Want king close to other king so can help with mates
+
+    var score: i32 = 0;
+
+    const whiteKing = squareFromBitboard(board.getPieceBitboard(.King, .White));
+    const blackKing = squareFromBitboard(board.getPieceBitboard(.King, .Black));
+
+    // Manhattan distance
+    const dist: i32 = @abs(whiteKing.file - blackKing.file) + @abs(whiteKing.rank - blackKing.rank);
+
+    // This div 4 is vibes based. Do not trust it
+    if (board.turn == .White)
+        score += @divFloor(16 - dist, 4);
+    if (board.turn == .Black)
+        score -= @divFloor(16 - dist, 4);
+
+    return score;
 }
 
 fn calculateColorMaterial(board: *ZChess.Board, color: ZChess.Color) i32 {

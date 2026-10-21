@@ -13,7 +13,7 @@ pub const ChessBot = struct {
     search: Search.Search = undefined,
     nodes: u64 = 0,
 
-    maxDepth: i32 = 16,
+    maxDepth: i32 = 10,
 
     io: std.Io = undefined,
     search_started_ts: std.Io.Timestamp = undefined,
@@ -52,8 +52,9 @@ pub const ChessBot = struct {
 
         const score_is_mate = @abs(bestScore) > Eval.MATE_THRESHOLD;
         if (score_is_mate) {
-            const raw_mate = Eval.MATE_VALUE - @as(i32, @intCast(@abs(bestScore)));
-            const mate_in: i32 = @max(raw_mate, @as(i32, 1));
+            // UCI reports mate in moves, the score encodes it in plies
+            const mate_plies = Eval.MATE_VALUE - @as(i32, @intCast(@abs(bestScore)));
+            const mate_in: i32 = @max(@divTrunc(mate_plies + 1, 2), @as(i32, 1));
             const signed_mate: i32 = if (bestScore < 0) -mate_in else mate_in;
             self.uci_interface.writeInfo(.Score_mate, "{d}", .{signed_mate});
         } else {
@@ -89,16 +90,18 @@ pub const ChessBot = struct {
 
         var depth: i32 = 1;
         while (depth <= depth_target) : (depth += 1) {
-            if (time_budget_ms > 0 and (self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds()) >= time_budget_ms and completed_depth > 0) break;
-
             var aspiration_window: i32 = if (depth == 1) 0 else 30;
             var alpha = if (depth == 1) NEG_INF else bestScore - aspiration_window;
             var beta = if (depth == 1) POS_INF else bestScore + aspiration_window;
             var iter_best_score: i32 = NEG_INF;
             var iter_best_move: ?ZChess.Move = null;
 
+            // If budget is greater than zero and time is still remaining and the depth is greater than zero, break out of the loop and return the best move
+            if (time_budget_ms > 0 and (self.search_started_ts.durationTo(std.Io.Clock.now(.awake, self.io)).toMilliseconds()) >= time_budget_ms and completed_depth > 0) break;
+
             while (true) {
                 const result = self.search.searchRoot(self, self.allocator, board, depth, alpha, beta, pvMove, emit_info);
+
                 iter_best_score = result.score;
                 iter_best_move = result.best_move;
 
@@ -154,15 +157,6 @@ pub const ChessBot = struct {
     }
 
     pub fn getMove(self: *ChessBot, board: *ZChess.Board) !ZChess.Move {
-        if (board.fullMoveNumber == 1 and board.turn == ZChess.Color.White) {
-            const e4 = ZChess.Move{
-                .from_square = ZChess.Square.fromFlat(12),
-                .to_square = ZChess.Square.fromFlat(28),
-                .move_type = ZChess.MoveType.Normal,
-                .promotion_piecetype = null,
-            };
-            return e4;
-        }
         return self.getMoveWithLimits(board, 4000, null, true);
     }
 
