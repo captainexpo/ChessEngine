@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "ZigChessBot",
+        .name = "ChessBot",
         .root_module = exe_mod,
     });
 
